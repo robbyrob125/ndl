@@ -5,6 +5,9 @@
 RCSwitch mySwitch = RCSwitch( );
 RCSwitch sender = RCSwitch( );
 LiquidCrystal lcd = LiquidCrystal(8 ,9 ,4 ,5 ,6 ,7);
+
+
+//Sender
 #define OnCode1 1381717
 #define OffCode1 1381716
 #define OnCode2 1394005
@@ -12,6 +15,11 @@ LiquidCrystal lcd = LiquidCrystal(8 ,9 ,4 ,5 ,6 ,7);
 #define CodeLength 24
 #define SendPin A5
 
+//Sonic sensor
+#define trigPin A2
+#define echoPin A1
+
+//Buttons
 #define KEY_COUNT 4
 
 int keyLimits [KEY_COUNT+1] = {100, 330, 580, 900, 1023};
@@ -26,7 +34,9 @@ void setup() {
   pinMode(SendPin, OUTPUT);
   sender.enableTransmit(SendPin);
   sender.setProtocol(1);
-  pinMode(13, OUTPUT);
+  Serial.begin (9600);
+  pinMode(trigPin, OUTPUT) ;
+  pinMode(echoPin, INPUT) ;
 }
 
 void button_left(){
@@ -58,6 +68,16 @@ int check_button(){
       return keyNames[i];
 }
 
+bool smaller_than(){
+    digitalWrite(trigPin, HIGH) ;
+    delayMicroseconds(10);
+    digitalWrite(trigPin, LOW) ;
+    int duration = pulseIn(echoPin, HIGH) ;
+    lcd.setCursor(0,1);
+    lcd.print((duration / 2) / 29);
+    return (((duration / 2) / 29) < 100);
+}
+
 void loop() {
   
   switch (check_button()) {
@@ -67,5 +87,11 @@ void loop() {
     case 3: button_left(); break;
     
   }
-
+  
+  if(smaller_than()){
+    sender.send(OnCode1,CodeLength);
+    sender.send(OnCode2,CodeLength);
+  }
+  
+  
 }
