@@ -28,14 +28,25 @@ def subscribe(proxy, event, *pargs):
     proxy.subscribe(event, *pargs)
     subscriptions.append((proxy, event))
 
-def main(ip):
+lastWord = None
+def getWord(mem, threshold=0.4):
+    global lastWord
+    words = mem.getData("WordRecognized")
+    if words != lastWord:
+        lastWord = words
+        try:
+            if words[1] > threshold:
+                return words[0]
+        except:
+            pass
+    return None
+    
+def setup(ip):
     mark = getProxy(ip, 'LandMarkDetection')
-    mem = getProxy(ip, 'Memory')
-    tts = getProxy(ip, 'TextToSpeech')
     motion = getProxy(ip, 'Motion')
     posture = getProxy(ip, 'RobotPosture')
-    tracker = getProxy(ip, 'Tracker')
     awareness = getProxy(ip, 'BasicAwareness')
+    speech = getProxy(ip, "SpeechRecognition")
 
     for stimulus in ['Sound', 'Movement', 'People', 'Touch']:
         awareness.setStimulusDetectionEnabled(stimulus, False)
@@ -54,6 +65,19 @@ def main(ip):
         motion.setBreathEnabled(part, False)
     motion.setAngles(['Head'], [0.0,0.0], 0.8)
     motion.setSmartStiffnessEnabled(True)
+    
+    speech.setVocabulary(['kitchen', 'room'], False)
+
+def follow(ip, goal, ascending=True):
+    mark = getProxy(ip, 'LandMarkDetection')
+    mem = getProxy(ip, 'Memory')
+    tts = getProxy(ip, 'TextToSpeech')
+    motion = getProxy(ip, 'Motion')
+    posture = getProxy(ip, 'RobotPosture')
+    tracker = getProxy(ip, 'Tracker')
+    awareness = getProxy(ip, 'BasicAwareness')
+
+    current = 0 if ascending else 1000
 
     while True:
         try:
@@ -63,7 +87,9 @@ def main(ip):
             detected = []
             marks = data[1]
             for [[_,alpha,beta,_,_,heading], [mark]] in marks:
-                detected.append((mark,alpha,beta,heading))
+                if mark > current and ascending or \
+                        mark < current and not ascending:
+                    detected.append((mark,alpha,beta,heading))
 
             print(detected)
             
@@ -71,6 +97,8 @@ def main(ip):
                 print("I'm totally confused")
             elif len(detected) == 1:
                 mark, alpha, beta, heading = detected[0]
+
+                current = mark
 
                 awareness.stopAwareness()
 
@@ -92,10 +120,46 @@ def main(ip):
                 tracker.stopTracker()
                 awareness.startAwareness()
 
+            if current == goal:
+                return
+
         except (IndexError, TypeError):
             pass
 
         time.sleep(0.3)
+
+def main(ip):
+    mark = getProxy(ip, 'LandMarkDetection')
+    mem = getProxy(ip, 'Memory')
+    tts = getProxy(ip, 'TextToSpeech')
+    motion = getProxy(ip, 'Motion')
+    posture = getProxy(ip, 'RobotPosture')
+    tracker = getProxy(ip, 'Tracker')
+    awareness = getProxy(ip, 'BasicAwareness')
+    speech = getProxy(ip, "SpeechRecognition")
+
+    setup(ip)
+    subscribe(speech, 'WordRecognized')
+
+    while True:
+        word = getWord(mem)
+        if word == 'kitchen':
+            tts.say('Following ascending')
+            speech.unsubscribe('WordRecognized')
+            follow(ip, 119, True)
+            subscribe(speech, 'WordRecognized')
+            tts.say('Done.')
+        elif word == 'room':
+            tts.say('Following descending')
+            speech.unsubscribe('WordRecognized')
+            follow(ip, 64, False)
+            subscribe(speech, 'WordRecognized')
+            tts.say('Done.')
+        elif word == None:
+            pass
+        else:
+            tts.say('Sorry, what?')
+    
 
 if __name__ == '__main__':
     try:
@@ -106,10 +170,14 @@ if __name__ == '__main__':
         traceback.print_exc()
 
     for proxy, event in subscriptions:
-        proxy.unsubscribe(event)
+        try:
+            proxy.unsubscribe(event)
+        except:
+            print("Couldn't unsubscribe from %s" % event)
    
     tracker = getProxy(NAO_IP, 'Tracker')
     tracker.stopTracker()
     tracker.unregisterAllTargets()
 
     print; print('Goodbye'); print
+
