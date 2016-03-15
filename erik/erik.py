@@ -1,12 +1,14 @@
+import math
 import sys
 import time
 import traceback
 
-from naoqi import ALProxy
+from naoqi import ALProxy, ALBroker, ALModule
 
 NAO_IP = "nao.local"
 NAO_PORT = 9559
 
+Erik = None
 subscriptions = []
 
 def StiffnessOn(proxy):
@@ -15,9 +17,9 @@ def StiffnessOn(proxy):
     pTimeLists = 1.0
     proxy.stiffnessInterpolation(pNames, pStiffnessLists, pTimeLists)
 
-def getProxy(robotIP, proxy):
+def getProxy(proxy):
     try:
-        p = ALProxy("AL" + proxy, robotIP, 9559)
+        p = ALProxy("AL" + proxy)
     except Exception, e:
         print "Could not create proxy to ", proxy
         print "Error was: ", e
@@ -40,23 +42,55 @@ def getWord(mem, threshold=0.4):
         except:
             pass
     return None
-    
+
+
+class Erik(ALModule):
+    def __init__(self, name):
+        ALModule.__init__(self, name)
+
+        self.name = name
+        print('Erik', name)
+
+        memory = getProxy('Memory')
+
+        #for button in ['Front', 'Middle']:
+        memory.subscribeToEvent('TouchChanged', 'Erik', 'onHeadTouched')
+
+    def onHeadTouched(self, *args):
+        memory = getProxy('Memory')
+        motion = getProxy('Motion')
+        posture = getProxy('RobotPosture')
+
+        print(args)
+
+        key = 'Device/SubDeviceList/Head/Touch/%s/Sensor/Value'
+        if memory.getData(key % 'Middle') == 1.0:
+            motion.stopMove()
+            posture.goToPosture('Stand', 0.6)
+        lif memory.getData(key % 'Front') == 1.0:
+            motion.stopMove()
+            posture.goToPosture('Sit', 0.6)
+            motion.rest()
+
+
 def setup(ip):
-    mark = getProxy(ip, 'LandMarkDetection')
-    motion = getProxy(ip, 'Motion')
-    posture = getProxy(ip, 'RobotPosture')
-    awareness = getProxy(ip, 'BasicAwareness')
-    speech = getProxy(ip, "SpeechRecognition")
+    mark = getProxy('LandMarkDetection')
+    motion = getProxy('Motion')
+    posture = getProxy('RobotPosture')
+    awareness = getProxy('BasicAwareness')
+    speech = getProxy("SpeechRecognition")
+    memory = getProxy('Memory')
 
     for stimulus in ['Sound', 'Movement', 'People', 'Touch']:
         awareness.setStimulusDetectionEnabled(stimulus, False)
     awareness.setEngagementMode('SemiEngaged')
     awareness.setTrackingMode('MoveContextually')
 
-    subscribe(mark, 'LandMarks', 500, 0.0)
+    subscribe(mark, 'LandMarks', 200, 0.0)
 
     # Stand
-    StiffnessOn(motion)
+    #StiffnessOn(motion)
+    motion.setSmartStiffnessEnabled(True)
     motion.wakeUp()
     posture.goToPosture("StandInit", 0.5)
 
@@ -67,22 +101,26 @@ def setup(ip):
     motion.setSmartStiffnessEnabled(True)
     
     speech.setVocabulary(['kitchen', 'room'], False)
+        
+    global Erik
+    Erik = Erik('Erik')
 
 def follow(ip, goal, ascending=True):
-    mark = getProxy(ip, 'LandMarkDetection')
-    mem = getProxy(ip, 'Memory')
-    tts = getProxy(ip, 'TextToSpeech')
-    motion = getProxy(ip, 'Motion')
-    posture = getProxy(ip, 'RobotPosture')
-    tracker = getProxy(ip, 'Tracker')
-    awareness = getProxy(ip, 'BasicAwareness')
+    awareness = getProxy('BasicAwareness')
+    mark = getProxy('LandMarkDetection')
+    mem = getProxy('Memory')
+    motion = getProxy('Motion')
+    posture = getProxy('RobotPosture')
+    tracker = getProxy('Tracker')
+    tts = getProxy('TextToSpeech')
 
     current = 0 if ascending else 1000
 
     while True:
+        if not motion.moveIsActive():
+            motion.move(0.0, 0.0, math.pi / 8, [['MaxStepFrequency', 0.5]])
         try:
             data = mem.getData('LandmarkDetected')
-            print(data)
 
             detected = []
             marks = data[1]
@@ -95,12 +133,13 @@ def follow(ip, goal, ascending=True):
             
             if len(detected) > 1:
                 print("I'm totally confused")
+                tts.say("I'm totally confused")
             elif len(detected) == 1:
                 mark, alpha, beta, heading = detected[0]
 
-                current = mark
-
                 awareness.stopAwareness()
+
+                motion.stopMove()
 
                 tracker.registerTarget('LandMark', [0.1, [mark]])
                 tracker.setMaximumDistanceDetection(1000)
@@ -110,33 +149,38 @@ def follow(ip, goal, ascending=True):
                 tts.say("%d" % mark)
 
                 while tracker.isActive() and not tracker.isTargetLost():
-                    print(tracker.getMode())
-                    time.sleep(1)
+                    [x,y,z] = tracker.getTargetPosition(2) # robot
+                    if x < 0.5 and y < 0.5:
+                        break
+                    print(tracker.getMode(), x, y, z)
+                    time.sleep(0.3)
 
-                result = 'lost' if tracker.isTargetLost() else 'done'
+                lost = tracker.isTargetLost()
+                result = 'lost' if lost else 'done'
                 tts.say(result)
                 print(result)
+
+                if not lost:
+                    current = mark
                 
                 tracker.stopTracker()
                 awareness.startAwareness()
 
-            if current == goal:
+            if current >= goal and ascending or \
+                    current <= goal and not ascending:
                 return
 
         except (IndexError, TypeError):
             pass
 
-        time.sleep(0.3)
+        time.sleep(0.2)
 
 def main(ip):
-    mark = getProxy(ip, 'LandMarkDetection')
-    mem = getProxy(ip, 'Memory')
-    tts = getProxy(ip, 'TextToSpeech')
-    motion = getProxy(ip, 'Motion')
-    posture = getProxy(ip, 'RobotPosture')
-    tracker = getProxy(ip, 'Tracker')
-    awareness = getProxy(ip, 'BasicAwareness')
-    speech = getProxy(ip, "SpeechRecognition")
+    broker = ALBroker('broker', '0.0.0.0', 0, ip, 9559)
+
+    mem = getProxy('Memory')
+    tts = getProxy('TextToSpeech')
+    speech = getProxy("SpeechRecognition")
 
     setup(ip)
     subscribe(speech, 'WordRecognized')
@@ -175,7 +219,7 @@ if __name__ == '__main__':
         except:
             print("Couldn't unsubscribe from %s" % event)
    
-    tracker = getProxy(NAO_IP, 'Tracker')
+    tracker = getProxy('Tracker')
     tracker.stopTracker()
     tracker.unregisterAllTargets()
 
