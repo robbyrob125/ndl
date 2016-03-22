@@ -48,6 +48,12 @@ def setup(ip):
     posture = getProxy(ip, 'RobotPosture')
     awareness = getProxy(ip, 'BasicAwareness')
     speech = getProxy(ip, "SpeechRecognition")
+    video = getProxy(ip, 'VideoRecorder')
+
+    # Stand
+    motion.setSmartStiffnessEnabled(True)
+    motion.wakeUp()
+    posture.goToPosture("StandInit", 0.5)
 
     for stimulus in ['Sound', 'Movement', 'People', 'Touch']:
         awareness.setStimulusDetectionEnabled(stimulus, False)
@@ -56,11 +62,6 @@ def setup(ip):
 
     subscribe(mark, 'LandMarks', 200, 0.0)
 
-    # Stand
-    motion.setSmartStiffnessEnabled(True)
-    motion.wakeUp()
-    posture.goToPosture("StandInit", 0.5)
-
     for part in ['Body', 'Head', 'Legs']:
         motion.setIdlePostureEnabled(part, False)
         motion.setBreathEnabled(part, False)
@@ -68,6 +69,11 @@ def setup(ip):
     motion.setSmartStiffnessEnabled(True)
     
     speech.setVocabulary([COMMAND_ASC, COMMAND_DESC], False)
+
+    video.setFrameRate(24.0)
+    video.setResolution(2)
+    video.startRecording('/home/nao/recordings/cameras', 
+            'erik-%d' % time.time())
 
 def follow(ip, goal, ascending=True):
     awareness = getProxy(ip, 'BasicAwareness')
@@ -122,7 +128,7 @@ def follow(ip, goal, ascending=True):
 
                 lost = tracker.isTargetLost()
                 result = 'lost' if lost else 'done'
-                tts.say(result)
+                #tts.say(result)
                 print(result)
 
                 if not lost:
@@ -148,24 +154,17 @@ def main(ip):
     setup(ip)
     subscribe(speech, 'WordRecognized')
 
+    targets = [(COMMAND_ASC, MARK_MAX, True), (COMMAND_DESC, MARK_MIN, False)]
+
     while True:
         word = getWord(mem)
-        if word == COMMAND_ASC:
-            tts.say('Following ascending')
-            speech.unsubscribe('WordRecognized')
-            follow(ip, MARK_MAX, True)
-            subscribe(speech, 'WordRecognized')
-            tts.say('Done.')
-        elif word == COMMAND_DESC:
-            tts.say('Following descending')
-            speech.unsubscribe('WordRecognized')
-            follow(ip, MARK_MIN, False)
-            subscribe(speech, 'WordRecognized')
-            tts.say('Done.')
-        elif word == None:
-            pass
-        else:
-            tts.say('Sorry, what?')
+        for command, target, asc in targets:
+            if word == command:
+                tts.say("Going to the %s" % word)
+                speech.unsubscribe('WordRecognized')
+                follow(ip, target, asc)
+                tts.say("I'm in the %s" % word)
+                subscribe(speech, 'WordRecognized')
     
 
 if __name__ == '__main__':
@@ -185,6 +184,9 @@ if __name__ == '__main__':
     tracker = getProxy(NAO_IP, 'Tracker')
     tracker.stopTracker()
     tracker.unregisterAllTargets()
+
+    video = getProxy(NAO_IP, 'VideoRecorder')
+    video.stopRecording()
 
     print; print('Goodbye'); print
 
