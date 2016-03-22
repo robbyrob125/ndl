@@ -3,23 +3,22 @@ import sys
 import time
 import traceback
 
-from naoqi import ALProxy, ALBroker, ALModule
+from naoqi import ALProxy
 
 NAO_IP = "nao.local"
 NAO_PORT = 9559
 
-Erik = None
+COMMAND_ASC = 'kitchen'
+COMMAND_DESC = 'room'
+
+MARK_MIN = 64
+MARK_MAX = 119
+
 subscriptions = []
 
-def StiffnessOn(proxy):
-    pNames = "Body"
-    pStiffnessLists = 1.0
-    pTimeLists = 1.0
-    proxy.stiffnessInterpolation(pNames, pStiffnessLists, pTimeLists)
-
-def getProxy(proxy):
+def getProxy(robotIP, proxy):
     try:
-        p = ALProxy("AL" + proxy)
+        p = ALProxy("AL" + proxy, robotIP, 9559)
     except Exception, e:
         print "Could not create proxy to ", proxy
         print "Error was: ", e
@@ -42,44 +41,13 @@ def getWord(mem, threshold=0.4):
         except:
             pass
     return None
-
-
-class Erik(ALModule):
-    def __init__(self, name):
-        ALModule.__init__(self, name)
-
-        self.name = name
-        print('Erik', name)
-
-        memory = getProxy('Memory')
-
-        #for button in ['Front', 'Middle']:
-        memory.subscribeToEvent('TouchChanged', 'Erik', 'onHeadTouched')
-
-    def onHeadTouched(self, *args):
-        memory = getProxy('Memory')
-        motion = getProxy('Motion')
-        posture = getProxy('RobotPosture')
-
-        print(args)
-
-        key = 'Device/SubDeviceList/Head/Touch/%s/Sensor/Value'
-        if memory.getData(key % 'Middle') == 1.0:
-            motion.stopMove()
-            posture.goToPosture('Stand', 0.6)
-        lif memory.getData(key % 'Front') == 1.0:
-            motion.stopMove()
-            posture.goToPosture('Sit', 0.6)
-            motion.rest()
-
-
+    
 def setup(ip):
-    mark = getProxy('LandMarkDetection')
-    motion = getProxy('Motion')
-    posture = getProxy('RobotPosture')
-    awareness = getProxy('BasicAwareness')
-    speech = getProxy("SpeechRecognition")
-    memory = getProxy('Memory')
+    mark = getProxy(ip, 'LandMarkDetection')
+    motion = getProxy(ip, 'Motion')
+    posture = getProxy(ip, 'RobotPosture')
+    awareness = getProxy(ip, 'BasicAwareness')
+    speech = getProxy(ip, "SpeechRecognition")
 
     for stimulus in ['Sound', 'Movement', 'People', 'Touch']:
         awareness.setStimulusDetectionEnabled(stimulus, False)
@@ -89,36 +57,36 @@ def setup(ip):
     subscribe(mark, 'LandMarks', 200, 0.0)
 
     # Stand
-    #StiffnessOn(motion)
     motion.setSmartStiffnessEnabled(True)
     motion.wakeUp()
     posture.goToPosture("StandInit", 0.5)
 
-    for part in ['Body', 'Head', 'Legs', 'Arms']:
+    for part in ['Body', 'Head', 'Legs']:
         motion.setIdlePostureEnabled(part, False)
         motion.setBreathEnabled(part, False)
     motion.setAngles(['Head'], [0.0,0.0], 0.8)
     motion.setSmartStiffnessEnabled(True)
     
-    speech.setVocabulary(['kitchen', 'room'], False)
-        
-    global Erik
-    Erik = Erik('Erik')
+    speech.setVocabulary([COMMAND_ASC, COMMAND_DESC], False)
 
 def follow(ip, goal, ascending=True):
-    awareness = getProxy('BasicAwareness')
-    mark = getProxy('LandMarkDetection')
-    mem = getProxy('Memory')
-    motion = getProxy('Motion')
-    posture = getProxy('RobotPosture')
-    tracker = getProxy('Tracker')
-    tts = getProxy('TextToSpeech')
+    awareness = getProxy(ip, 'BasicAwareness')
+    mark = getProxy(ip, 'LandMarkDetection')
+    mem = getProxy(ip, 'Memory')
+    motion = getProxy(ip, 'Motion')
+    posture = getProxy(ip, 'RobotPosture')
+    tracker = getProxy(ip, 'Tracker')
+    tts = getProxy(ip, 'TextToSpeech')
 
     current = 0 if ascending else 1000
 
     while True:
+        motion.setAngles(['Head'], [0.0,0.0], 0.8)
         if not motion.moveIsActive():
-            motion.move(0.0, 0.0, math.pi / 8, [['MaxStepFrequency', 0.5]])
+            motion.move(0.0, 0.0, math.pi / 4, 
+                    [['MaxStepFrequency', 0.5],
+                        ['MaxStepTheta', math.pi / 16],
+                        ['MaxStepX', 0.05]])
         try:
             data = mem.getData('LandmarkDetected')
 
@@ -129,17 +97,12 @@ def follow(ip, goal, ascending=True):
                         mark < current and not ascending:
                     detected.append((mark,alpha,beta,heading))
 
-            print(detected)
-            
             if len(detected) > 1:
                 print("I'm totally confused")
-                tts.say("I'm totally confused")
             elif len(detected) == 1:
                 mark, alpha, beta, heading = detected[0]
 
                 awareness.stopAwareness()
-
-                motion.stopMove()
 
                 tracker.registerTarget('LandMark', [0.1, [mark]])
                 tracker.setMaximumDistanceDetection(1000)
@@ -147,6 +110,8 @@ def follow(ip, goal, ascending=True):
                 tracker.track('LandMark')
                 tracker.setRelativePosition([-0.3, 0.0, 0.0, 0.1, 0.1, 0.3])
                 tts.say("%d" % mark)
+        
+                motion.move(0.0, 0.0, 0 - math.pi / 8)
 
                 while tracker.isActive() and not tracker.isTargetLost():
                     [x,y,z] = tracker.getTargetPosition(2) # robot
@@ -176,27 +141,25 @@ def follow(ip, goal, ascending=True):
         time.sleep(0.2)
 
 def main(ip):
-    broker = ALBroker('broker', '0.0.0.0', 0, ip, 9559)
-
-    mem = getProxy('Memory')
-    tts = getProxy('TextToSpeech')
-    speech = getProxy("SpeechRecognition")
+    mem = getProxy(ip, 'Memory')
+    tts = getProxy(ip, 'TextToSpeech')
+    speech = getProxy(ip, "SpeechRecognition")
 
     setup(ip)
     subscribe(speech, 'WordRecognized')
 
     while True:
         word = getWord(mem)
-        if word == 'kitchen':
+        if word == COMMAND_ASC:
             tts.say('Following ascending')
             speech.unsubscribe('WordRecognized')
-            follow(ip, 119, True)
+            follow(ip, MARK_MAX, True)
             subscribe(speech, 'WordRecognized')
             tts.say('Done.')
-        elif word == 'room':
+        elif word == COMMAND_DESC:
             tts.say('Following descending')
             speech.unsubscribe('WordRecognized')
-            follow(ip, 64, False)
+            follow(ip, MARK_MIN, False)
             subscribe(speech, 'WordRecognized')
             tts.say('Done.')
         elif word == None:
@@ -219,7 +182,7 @@ if __name__ == '__main__':
         except:
             print("Couldn't unsubscribe from %s" % event)
    
-    tracker = getProxy('Tracker')
+    tracker = getProxy(NAO_IP, 'Tracker')
     tracker.stopTracker()
     tracker.unregisterAllTargets()
 
