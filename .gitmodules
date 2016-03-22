@@ -1,3 +1,6 @@
 [submodule "libraries/RCSwitch"]
 	path = libraries/RCSwitch
 	url = https://github.com/sui77/rc-switch.git
+[submodule "presentatie/presentations"]
+	path = presentatie/presentations
+	url = https://github.com/naiaden/presentations
