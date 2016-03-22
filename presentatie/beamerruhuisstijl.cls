@@ -1,0 +1,1 @@
+presentations/ruhuisstijl/distributed/beamerruhuisstijl.cls
